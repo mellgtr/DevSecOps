@@ -1,69 +1,162 @@
 const express = require("express");
+const { Pool } = require("pg");
+
 const app = express();
 app.use(express.json());
 
-// Fake DB for now — replaced later with PostgreSQL
-let todos = [
-  { id: 1, task: "Préparer le projet DevSecOps", done: false },
-  { id: 2, task: "Créer l'image Docker", done: true }
-];
+// ======================================================
+//  VARIABLES D'ENVIRONNEMENT (compatibles Kubernetes)
+// ======================================================
 
-// ➜ GET all todos
-app.get("/todos", (req, res) => {
-  res.json({
-    message: "Liste des tâches",
-    count: todos.length,
-    data: todos
-  });
+const {
+  DB_HOST = "postgres",
+  DB_PORT = 5432,
+  DB_USER = "todo_suer", // valeur du secret-base64
+  DB_PASSWORD = "TodnPass123!Mh",
+  DB_NAME = "todo_db",
+} = process.env;
+
+console.log("Configuration PostgreSQL :");
+console.log("   HOST:", DB_HOST);
+console.log("   PORT:", DB_PORT);
+console.log("   USER:", DB_USER);
+console.log("   DB NAME:", DB_NAME);
+
+// ======================================================
+//  CONNEXION À POSTGRESQL
+// ======================================================
+
+const pool = new Pool({
+  host: DB_HOST,
+  port: Number(DB_PORT),
+  user: DB_USER,
+  password: DB_PASSWORD,
+  database: DB_NAME,
 });
 
-// ➜ POST create a new todo
-app.post("/todos", (req, res) => {
-  const { task } = req.body;
-  const newTodo = {
-    id: todos.length + 1,
-    task,
-    done: false
-  };
-  todos.push(newTodo);
+// ======================================================
+//  INITIALISATION DE LA TABLE TODOS
+// ======================================================
 
-  res.status(201).json({
-    message: "Tâche créée",
-    data: newTodo
-  });
+async function initDb() {
+  const createTableQuery = `
+    CREATE TABLE IF NOT EXISTS todos (
+      id SERIAL PRIMARY KEY,
+      task TEXT NOT NULL,
+      done BOOLEAN NOT NULL DEFAULT false
+    );
+  `;
+
+  await pool.query(createTableQuery);
+  console.log("Table 'todos' OK (créée ou déjà existante)");
+}
+
+// ======================================================
+//  ROUTES DE L'API
+// ======================================================
+
+// GET /todos
+app.get("/todos", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT id, task, done FROM todos ORDER BY id;");
+    res.json({
+      message: "Liste des tâches",
+      count: result.rowCount,
+      data: result.rows,
+    });
+  } catch (err) {
+    console.error("Erreur GET /todos :", err);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
 });
 
-// ➜ PUT mark as done
-app.put("/todos/:id/done", (req, res) => {
-  const id = parseInt(req.params.id);
-  const todo = todos.find(t => t.id === id);
+// POST /todos
+app.post("/todos", async (req, res) => {
+  try {
+    const { task } = req.body;
 
-  if (!todo)
-    return res.status(404).json({ error: "Tâche non trouvée" });
+    if (!task) {
+      return res.status(400).json({ error: "Le champ 'task' est obligatoire" });
+    }
 
-  todo.done = true;
+    const result = await pool.query(
+      "INSERT INTO todos (task, done) VALUES ($1, $2) RETURNING id, task, done;",
+      [task, false]
+    );
 
-  res.json({
-    message: "Tâche complétée",
-    data: todo
-  });
+    res.status(201).json({
+      message: "Tâche créée",
+      data: result.rows[0],
+    });
+  } catch (err) {
+    console.error("Erreur POST /todos :", err);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
 });
 
-// ➜ DELETE remove a task
-app.delete("/todos/:id", (req, res) => {
-  const id = parseInt(req.params.id);
-  const index = todos.findIndex(t => t.id === id);
+// PUT /todos/:id/done
+app.put("/todos/:id/done", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
 
-  if (index === -1)
-    return res.status(404).json({ error: "Tâche non trouvée" });
+    const result = await pool.query(
+      "UPDATE todos SET done = true WHERE id = $1 RETURNING id, task, done;",
+      [id]
+    );
 
-  const deleted = todos.splice(index, 1);
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Tâche non trouvée" });
+    }
 
-  res.json({
-    message: "Tâche supprimée",
-    data: deleted[0]
-  });
+    res.json({
+      message: "Tâche marquée comme terminée",
+      data: result.rows[0],
+    });
+  } catch (err) {
+    console.error("Erreur PUT /todos/:id/done :", err);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
 });
 
-// Server
-app.listen(3000, () => console.log("API Running on port 3000"));
+// DELETE /todos/:id
+app.delete("/todos/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    const result = await pool.query(
+      "DELETE FROM todos WHERE id = $1 RETURNING id, task, done;",
+      [id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Tâche non trouvée" });
+    }
+
+    res.json({
+      message: "Tâche supprimée",
+      data: result.rows[0],
+    });
+  } catch (err) {
+    console.error("Erreur DELETE /todos/:id :", err);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+});
+
+// ======================================================
+//  LANCEMENT DU SERVEUR
+// ======================================================
+
+const PORT = 3000;
+
+initDb()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(
+        `API Running on port ${PORT} — connectée à PostgreSQL (${DB_HOST}:${DB_PORT})`
+      );
+    });
+  })
+  .catch((err) => {
+    console.error("Erreur lors de l'initialisation de la base :", err);
+    process.exit(1);
+  });
