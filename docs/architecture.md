@@ -1,67 +1,20 @@
-Ce document présente l’architecture complète du projet To-Do List, comprenant l’application web, la base de données et leur déploiement sur Kubernetes.
+Architecture du Projet – To-Do List (NodeJS + PostgreSQL + Kubernetes)
 
-1. Vue d’ensemble
+L’architecture repose sur deux Pods : l’application NodeJS et la base PostgreSQL, communiquant via des Services Kubernetes.
 
-L’application comporte deux composants principaux :
+Schéma d'architecture :
 
-Backend NodeJS (API To-Do)
+Utilisateur --> (NodePort Service) --> Pod NodeJS --> (ClusterIP interne) --> Pod PostgreSQL + PVC
 
-Base de données PostgreSQL
+Composants :
 
-Chaque composant tourne dans un Pod indépendant et communique via des Services Kubernetes.
+- App NodeJS : Deployment + Service NodePort
+- PostgreSQL : Deployment + PVC + ConfigMap + Secret + Service ClusterIP
+- Stockage : PersistentVolumeClaim
+- Réseau : Services Kubernetes
 
-2. Schéma d’architecture
-                 ┌──────────────────────────┐
-                 │       Utilisateur        │
-                 └─────────────┬────────────┘
-                               │
-                        (NodePort Service)
-                               │
-                 ┌─────────────▼─────────────┐
-                 │     Pod Web (NodeJS)      │
-                 │  API To-Do (CRUD simple)  │
-                 └─────────────┬─────────────┘
-                               │
-                     (ClusterIP interne)
-                               │
-                 ┌─────────────▼─────────────┐
-                 │   Pod PostgreSQL (DB)     │
-                 │  + PersistentVolumeClaim   │
-                 └────────────────────────────┘
-
-3. Composants Kubernetes
-PostgreSQL
-
-deployment-db.yaml
-
-pvc-db.yaml
-
-secret-db.yaml
-
-configmap-db.yaml
-
-service-db.yaml (ClusterIP)
-
-Application Web (NodeJS)
-
-Dockerfile
-
-deployment-web.yaml
-
-service-web.yaml (NodePort)
-
-4. Architecture Docker
-Service	Image Docker
-App Web	todo-app-nodejs
-Base de DB	postgres:latest
-5. Résumé
-
-Architecture simple, claire :
-
-un Pod DB + persistance
-
-un Pod Web
-
-communication interne via ClusterIP
-
-exposition externe via NodePort
+Résumé :
+2 Pods indépendants
+Communication interne via ClusterIP
+Accès externe via NodePort
+Base persistante via PVC
